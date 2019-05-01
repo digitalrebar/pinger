@@ -224,29 +224,46 @@ func (p *pinger) mainLoop(conn *icmp.PacketConn) {
 // The InUse method on the Pinter returned by ICMP accepts raw IPv4 or
 // IPv6 addresses.
 func ICMP() (Pinger, error) {
+	return ICMPSelectOptions(true, true)
+}
+func ICMPv4Only() (Pinger, error) {
+	return ICMPSelectOptions(true, false)
+}
+func ICMPv6Only() (Pinger, error) {
+	return ICMPSelectOptions(false, true)
+}
+
+func ICMPSelectOptions(ipv4On, ipv6On bool) (Pinger, error) {
+	if !ipv4On && !ipv6On {
+		return nil, fmt.Errorf("Must specify something to listen on.")
+	}
 	res := &pinger{
 		Mutex:    &sync.Mutex{},
 		probes:   map[string][]chan<- bool{},
 		timeouts: map[string]time.Time{},
 	}
-	conn4, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
-	if err != nil {
-		return nil, err
+	if ipv4On {
+		conn4, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0")
+		if err != nil {
+			return nil, err
+		}
+		if err := conn4.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+			return nil, err
+		}
+		res.conn4 = conn4
+		go res.mainLoop(conn4)
 	}
-	if err := conn4.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-		return nil, err
+	if ipv6On {
+		conn6, err := icmp.ListenPacket("ip6:ipv6-icmp", "::")
+		if err != nil {
+			return nil, err
+		}
+		if err := conn6.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+			return nil, err
+		}
+		res.conn6 = conn6
+		go res.mainLoop(conn6)
 	}
-	res.conn4 = conn4
-	go res.mainLoop(conn4)
-	conn6, err := icmp.ListenPacket("ip6:ipv6-icmp", "::")
-	if err != nil {
-		return nil, err
-	}
-	if err := conn6.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-		return nil, err
-	}
-	res.conn6 = conn6
-	go res.mainLoop(conn6)
 	return res, nil
 }
 
